@@ -11,6 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      # Map secret to env so `if` conditions can check it safely
+      HAS_FEISHU: ${{ secrets.FEISHU_APP_ID != '' }}
 
     steps:
       - name: Checkout code
@@ -39,7 +42,9 @@ jobs:
       - name: Set current date as environment variable
         run: echo "DATE=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
 
-      # Option A: Deploy to gh-pages branch (recommended for GitHub Pages)
+      # ============================================================
+      # Deploy to GitHub Pages (existing — unchanged)
+      # ============================================================
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
@@ -49,3 +54,80 @@ jobs:
           commit_message: "Daily Summary: ${{ env.DATE }}"
           publish_branch: gh-pages
           enable_jekyll: true
+
+      # ============================================================
+      # Deliver to Feishu (skips if FEISHU_APP_ID secret not set)
+      # ============================================================
+      - name: Set up Node.js (for lark-cli)
+        if: env.HAS_FEISHU == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install lark-cli
+        if: env.HAS_FEISHU == 'true'
+        run: npm install -g @larksuite/cli
+
+      - name: Deliver summary to Feishu
+        if: env.HAS_FEISHU == 'true'
+        continue-on-error: true   # Feishu failure must not break GitHub Pages deploy
+        env:
+          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+          FEISHU_USER_OPEN_ID: ${{ secrets.FEISHU_USER_OPEN_ID }}
+          GITHUB_PAGES_URL: https://dsongmail.github.io/Horizon
+        run: |
+          set -e
+
+          SUMMARY_FILE="docs/_posts/${DATE}-summary-zh.md"
+          if [ ! -f "$SUMMARY_FILE" ]; then
+            echo "❌ Summary file not found: $SUMMARY_FILE"
+            echo "::warning::Feishu delivery skipped — summary file missing"
+            exit 0
+          fi
+
+          echo "📄 Summary file: $SUMMARY_FILE ($(wc -c < "$SUMMARY_FILE") bytes)"
+
+          # 1. Create Feishu doc
+          echo "📝 Creating Feishu doc..."
+          DOC_RESULT=$(lark-cli docs +create \
+            --api-version v2 \
+            --doc-format markdown \
+            --as bot \
+            --content "@${SUMMARY_FILE}" 2>&1) || {
+            echo "::warning::Feishu doc creation failed"
+            echo "$DOC_RESULT"
+            exit 0
+          }
+          echo "$DOC_RESULT"
+
+          DOC_URL=$(echo "$DOC_RESULT" | jq -r '.data.document.url // empty')
+          if [ -z "$DOC_URL" ]; then
+            echo "::warning::Feishu doc created but no URL in response — message skipped"
+            exit 0
+          fi
+          echo "✅ Feishu doc created: $DOC_URL"
+
+          # 2. Send Feishu message with links
+          echo "📨 Sending Feishu message..."
+          MSG_TEXT="🌅 Horizon 每日简报已生成 (${DATE})
+
+          📖 飞书文档: ${DOC_URL}
+          🌐 GitHub Pages: ${GITHUB_PAGES_URL}"
+
+          MSG_RESULT=$(lark-cli im +messages-send \
+            --as bot \
+            --user-id "${FEISHU_USER_OPEN_ID}" \
+            --text "${MSG_TEXT}" 2>&1) || {
+            echo "::warning::Feishu message send failed (doc was created at ${DOC_URL})"
+            echo "$MSG_RESULT"
+            exit 0
+          }
+          echo "$MSG_RESULT"
+
+          MESSAGE_ID=$(echo "$MSG_RESULT" | jq -r '.message_id // empty')
+          if [ -n "$MESSAGE_ID" ]; then
+            echo "✅ Feishu message sent (message_id: $MESSAGE_ID)"
+          else
+            echo "::warning::Feishu message sent but no message_id in response"
+          fi
