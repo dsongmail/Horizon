@@ -104,12 +104,9 @@ jobs:
           # 1. Create Feishu doc (prep title to avoid "Untitled")
           echo "📝 Creating Feishu doc..."
           TEMP_MD=$(mktemp)
-          # lark-cli extracts title from first "# Heading" — prep one
           echo "# Horizon Summary: ${DATE} (ZH)" > "$TEMP_MD"
           echo "" >> "$TEMP_MD"
-          # Strip Jekyll front matter (--- ... ---) and append body
-          CLOSE_LINE=$(grep -n '^---$' "$SUMMARY_FILE" | head -2 | tail -1 | cut -d: -f1)
-          tail -n +$((CLOSE_LINE + 1)) "$SUMMARY_FILE" >> "$TEMP_MD"
+          cat "$SUMMARY_FILE" >> "$TEMP_MD"
 
           lark-cli docs +create \
             --api-version v2 \
