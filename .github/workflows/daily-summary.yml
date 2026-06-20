@@ -101,14 +101,36 @@ jobs:
 
           echo "📄 Summary file: $SUMMARY_FILE ($(wc -c < "$SUMMARY_FILE") bytes)"
 
-          # 1. Create Feishu doc
+          # 1. Create Feishu doc (prep title to avoid "Untitled")
           echo "📝 Creating Feishu doc..."
+          TEMP_MD=$(mktemp)
+          # lark-cli extracts title from first "# Heading" — prep one
+          echo "# Horizon Summary: ${DATE} (ZH)" > "$TEMP_MD"
+          echo "" >> "$TEMP_MD"
+          # Strip Jekyll front matter (lines between first and second "---")
+          IN_FM=false
+          while IFS= read -r line; do
+            if [ "$line" = "---" ]; then
+              if [ "$IN_FM" = false ]; then
+                IN_FM=true
+                continue
+              else
+                IN_FM=false
+                continue
+              fi
+            fi
+            if [ "$IN_FM" = false ]; then
+              echo "$line" >> "$TEMP_MD"
+            fi
+          done < "$SUMMARY_FILE"
+
           lark-cli docs +create \
             --api-version v2 \
             --doc-format markdown \
             --as bot \
-            --content "@${SUMMARY_FILE}" > /tmp/doc_result.json 2>&1
+            --content "@${TEMP_MD}" > /tmp/doc_result.json 2>&1
           DOC_EXIT=$?
+          rm -f "$TEMP_MD"
 
           cat /tmp/doc_result.json
 
