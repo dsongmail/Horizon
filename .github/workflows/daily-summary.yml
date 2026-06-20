@@ -107,22 +107,9 @@ jobs:
           # lark-cli extracts title from first "# Heading" — prep one
           echo "# Horizon Summary: ${DATE} (ZH)" > "$TEMP_MD"
           echo "" >> "$TEMP_MD"
-          # Strip Jekyll front matter (lines between first and second "---")
-          IN_FM=false
-          while IFS= read -r line; do
-            if [ "$line" = "---" ]; then
-              if [ "$IN_FM" = false ]; then
-                IN_FM=true
-                continue
-              else
-                IN_FM=false
-                continue
-              fi
-            fi
-            if [ "$IN_FM" = false ]; then
-              echo "$line" >> "$TEMP_MD"
-            fi
-          done < "$SUMMARY_FILE"
+          # Strip Jekyll front matter (--- ... ---) and append body
+          CLOSE_LINE=$(grep -n '^---$' "$SUMMARY_FILE" | head -2 | tail -1 | cut -d: -f1)
+          tail -n +$((CLOSE_LINE + 1)) "$SUMMARY_FILE" >> "$TEMP_MD"
 
           lark-cli docs +create \
             --api-version v2 \
