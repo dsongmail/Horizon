@@ -92,6 +92,7 @@ jobs:
           FEISHU_USER_OPEN_ID: ${{ secrets.FEISHU_USER_OPEN_ID }}
           GITHUB_PAGES_URL: https://dsongmail.github.io/Horizon
         run: |
+          set +e  # disable implicit bash -e from CI runner
           SUMMARY_FILE="docs/_posts/${DATE}-summary-zh.md"
 
           if [ ! -f "$SUMMARY_FILE" ]; then
@@ -101,24 +102,14 @@ jobs:
 
           echo "📄 Summary file: $SUMMARY_FILE ($(wc -c < "$SUMMARY_FILE") bytes)"
 
-          # 1. Create Feishu doc (prep title to avoid "Untitled")
+          # 1. Create Feishu doc (prep # Title via stdin to avoid "Untitled")
           echo "📝 Creating Feishu doc..."
-          TEMP_MD=$(mktemp)
-          echo "# Horizon Summary: ${DATE} (ZH)" > "$TEMP_MD"
-          echo "" >> "$TEMP_MD"
-          cat "$SUMMARY_FILE" >> "$TEMP_MD"
-
-          lark-cli docs +create \
-            --api-version v2 \
-            --doc-format markdown \
-            --as bot \
-            --content "@${TEMP_MD}" > /tmp/doc_result.json 2>&1
+          (echo "# Horizon Summary: ${DATE} (ZH)"; echo ""; cat "$SUMMARY_FILE") | \
+            lark-cli docs +create --api-version v2 --doc-format markdown --as bot --content - > /tmp/doc_result.json 2>&1
           DOC_EXIT=$?
-          rm -f "$TEMP_MD"
 
           cat /tmp/doc_result.json
 
-          # Extract URL with sed (avoids jq secret-redaction issues in CI)
           DOC_URL=$(sed -n 's/.*"url": *"\([^"]*\)".*/\1/p' /tmp/doc_result.json | head -1)
 
           if [ "$DOC_EXIT" -ne 0 ] || [ -z "$DOC_URL" ]; then
@@ -128,16 +119,9 @@ jobs:
 
           echo "✅ Feishu doc created: $DOC_URL"
 
-          # 2. Send Feishu message
+          # 2. Send Feishu message (single line, no backslash continuation)
           echo "📨 Sending Feishu message..."
-          MSG_TEXT="🌅 Horizon 每日简报已生成 (${DATE})
-          📖 飞书文档: ${DOC_URL}
-          🌐 GitHub Pages: ${GITHUB_PAGES_URL}"
-
-          lark-cli im +messages-send \
-            --as bot \
-            --user-id "${FEISHU_USER_OPEN_ID}" \
-            --text "${MSG_TEXT}" > /tmp/msg_result.json 2>&1
+          lark-cli im +messages-send --as bot --user-id "${FEISHU_USER_OPEN_ID}" --text "🌅 Horizon 每日简报已生成 (${DATE}) | 📖 飞书文档: ${DOC_URL} | 🌐 GitHub Pages: ${GITHUB_PAGES_URL}" > /tmp/msg_result.json 2>&1
           MSG_EXIT=$?
 
           cat /tmp/msg_result.json
