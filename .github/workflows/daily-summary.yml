@@ -68,12 +68,21 @@ jobs:
         if: env.HAS_FEISHU == 'true'
         run: npm install -g @larksuite/cli
 
+      - name: Configure lark-cli
+        if: env.HAS_FEISHU == 'true'
+        env:
+          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+        run: |
+          echo "$FEISHU_APP_SECRET" | lark-cli config init \
+            --app-id "$FEISHU_APP_ID" \
+            --app-secret-stdin \
+            --brand feishu
+
       - name: Deliver summary to Feishu
         if: env.HAS_FEISHU == 'true'
         continue-on-error: true   # Feishu failure must not break GitHub Pages deploy
         env:
-          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
-          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
           FEISHU_USER_OPEN_ID: ${{ secrets.FEISHU_USER_OPEN_ID }}
           GITHUB_PAGES_URL: https://dsongmail.github.io/Horizon
         run: |
