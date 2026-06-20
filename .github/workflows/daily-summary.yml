@@ -74,10 +74,16 @@ jobs:
           FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
           FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
         run: |
+          echo "🔧 Configuring lark-cli with app_id=${FEISHU_APP_ID:0:8}..."
           echo "$FEISHU_APP_SECRET" | lark-cli config init \
             --app-id "$FEISHU_APP_ID" \
             --app-secret-stdin \
-            --brand feishu
+            --brand feishu 2>&1
+          echo "--- config init exit code: $? ---"
+          echo "--- config show ---"
+          lark-cli config show 2>&1 || true
+          echo "--- config files ---"
+          ls -la ~/.lark-cli/ 2>&1 || true
 
       - name: Deliver summary to Feishu
         if: env.HAS_FEISHU == 'true'
@@ -86,11 +92,9 @@ jobs:
           FEISHU_USER_OPEN_ID: ${{ secrets.FEISHU_USER_OPEN_ID }}
           GITHUB_PAGES_URL: https://dsongmail.github.io/Horizon
         run: |
-          set -e
-
           SUMMARY_FILE="docs/_posts/${DATE}-summary-zh.md"
+
           if [ ! -f "$SUMMARY_FILE" ]; then
-            echo "❌ Summary file not found: $SUMMARY_FILE"
             echo "::warning::Feishu delivery skipped — summary file missing"
             exit 0
           fi
@@ -99,44 +103,46 @@ jobs:
 
           # 1. Create Feishu doc
           echo "📝 Creating Feishu doc..."
-          DOC_RESULT=$(lark-cli docs +create \
+          lark-cli docs +create \
             --api-version v2 \
             --doc-format markdown \
             --as bot \
-            --content "@${SUMMARY_FILE}" 2>&1) || {
-            echo "::warning::Feishu doc creation failed"
-            echo "$DOC_RESULT"
-            exit 0
-          }
-          echo "$DOC_RESULT"
+            --content "@${SUMMARY_FILE}" > /tmp/doc_result.json 2>&1
+          DOC_EXIT=$?
 
-          DOC_URL=$(echo "$DOC_RESULT" | jq -r '.data.document.url // empty')
-          if [ -z "$DOC_URL" ]; then
-            echo "::warning::Feishu doc created but no URL in response — message skipped"
+          cat /tmp/doc_result.json
+
+          if [ "$DOC_EXIT" -ne 0 ]; then
+            echo "::warning::Feishu doc creation failed (exit code: $DOC_EXIT)"
             exit 0
           fi
+
+          DOC_OK=*** -r '.ok' /tmp/doc_result.json 2>/dev/null)
+          DOC_URL=*** -r '.data.document.url // empty' /tmp/doc_result.json 2>/dev/null)
+
+          if [ "$DOC_OK" != "true" ] || [ -z "$DOC_URL" ]; then
+            echo "::warning::Feishu doc creation returned ok=$DOC_OK, url=$DOC_URL"
+            exit 0
+          fi
+
           echo "✅ Feishu doc created: $DOC_URL"
 
-          # 2. Send Feishu message with links
+          # 2. Send Feishu message
           echo "📨 Sending Feishu message..."
           MSG_TEXT="🌅 Horizon 每日简报已生成 (${DATE})
-
           📖 飞书文档: ${DOC_URL}
           🌐 GitHub Pages: ${GITHUB_PAGES_URL}"
 
-          MSG_RESULT=$(lark-cli im +messages-send \
+          lark-cli im +messages-send \
             --as bot \
             --user-id "${FEISHU_USER_OPEN_ID}" \
-            --text "${MSG_TEXT}" 2>&1) || {
-            echo "::warning::Feishu message send failed (doc was created at ${DOC_URL})"
-            echo "$MSG_RESULT"
-            exit 0
-          }
-          echo "$MSG_RESULT"
+            --text "${MSG_TEXT}" > /tmp/msg_result.json 2>&1
+          MSG_EXIT=$?
 
-          MESSAGE_ID=$(echo "$MSG_RESULT" | jq -r '.message_id // empty')
-          if [ -n "$MESSAGE_ID" ]; then
-            echo "✅ Feishu message sent (message_id: $MESSAGE_ID)"
+          cat /tmp/msg_result.json
+
+          if [ "$MSG_EXIT" -eq 0 ]; then
+            echo "✅ Feishu message sent"
           else
-            echo "::warning::Feishu message sent but no message_id in response"
+            echo "::warning::Feishu message send failed (exit code: $MSG_EXIT)"
           fi
