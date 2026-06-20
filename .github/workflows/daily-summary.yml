@@ -112,16 +112,11 @@ jobs:
 
           cat /tmp/doc_result.json
 
-          if [ "$DOC_EXIT" -ne 0 ]; then
-            echo "::warning::Feishu doc creation failed (exit code: $DOC_EXIT)"
-            exit 0
-          fi
+          # Extract URL with sed (avoids jq secret-redaction issues in CI)
+          DOC_URL=$(sed -n 's/.*"url": *"\([^"]*\)".*/\1/p' /tmp/doc_result.json | head -1)
 
-          DOC_OK=*** -r '.ok' /tmp/doc_result.json 2>/dev/null)
-          DOC_URL=*** -r '.data.document.url // empty' /tmp/doc_result.json 2>/dev/null)
-
-          if [ "$DOC_OK" != "true" ] || [ -z "$DOC_URL" ]; then
-            echo "::warning::Feishu doc creation returned ok=$DOC_OK, url=$DOC_URL"
+          if [ "$DOC_EXIT" -ne 0 ] || [ -z "$DOC_URL" ]; then
+            echo "::warning::Feishu doc creation failed (exit=$DOC_EXIT, url=$DOC_URL)"
             exit 0
           fi
 
